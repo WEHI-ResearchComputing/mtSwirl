@@ -75,7 +75,13 @@ task MongoSubsetBamToChrMAndRevert {
       idxstats \
       "~{d}{this_bam}" \
       --threads ~{default="1" n_cpu} \
-      2>&1 > "~{d}{this_sample}.stats.tsv"
+      > "~{d}{this_sample}.stats.tsv"
+
+    /usr/bin/samtools-1.9/samtools \
+      flagstat \
+      "~{d}{this_bam}" \
+      --threads ~{default="1" n_cpu} \
+      > "~{d}{this_sample}.flagstat.txt"
 
     gatk CollectQualityYieldMetrics \
       -I "~{d}{this_bam}" \
@@ -180,6 +186,7 @@ task MongoSubsetBamToChrMAndRevert {
     Int mean_coverage = read_int("out/~{sample_name}.mean_coverage.txt")
     File idxstats_metrics = "out/~{sample_name}.stats.tsv"
     File yield_metrics = "out/~{sample_name}.yield_metrics.txt"
+    File flagstat = "out/~{sample_name}.flagstat.txt"
   }
 }
 

@@ -318,9 +318,13 @@ workflow MitochondriaPipeline {
     }
   }
 
-  output { # need to edit
+  output {
     File subset_bam = SubsetBamToChrMAndRevert.output_bam
     File subset_bai = SubsetBamToChrMAndRevert.output_bai
+    File idxstats_metrics = SubsetBamToChrMAndRevert.idxstats_metrics
+    File yield_metrics = SubsetBamToChrMAndRevert.yield_metrics
+    File flagstat = SubsetBamToChrMAndRevert.flagstat
+
     File r1_vcf = AlignAndCallR1.out_vcf
     File r1_vcf_index = AlignAndCallR1.out_vcf_index
     File r1_nuc_vcf = AlignAndCallR1.nuc_vcf
