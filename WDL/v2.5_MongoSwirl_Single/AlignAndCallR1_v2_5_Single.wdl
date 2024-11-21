@@ -1,6 +1,6 @@
 version 1.0
 
-import "https://raw.githubusercontent.com/rahulg603/mtSwirl/master/WDL/v2.5_MongoSwirl_Single/MongoTasks_v2_5_Single.wdl" as MongoTasks_Single
+import "MongoTasks_v2_5_Single.wdl" as MongoTasks_Single
 
 workflow AlignAndCallR1 {
   meta {
@@ -86,7 +86,6 @@ workflow AlignAndCallR1 {
         suffix = '.nuc',
         mt_interval_list = nuc_interval_list,
 
-        compress = compress_output_vcf,
         m2_extra_args = select_first([m2_extra_args, ""]),
 
         max_alt_allele_count = 4,
@@ -411,17 +410,20 @@ task Filter {
   
   # hc_contamination will be None if hasContamination is not defined (I think) OR contamination_major not defined OR contamination_minor not defined
   String hasContamination_2 = select_first([hasContamination,"NOT FOUND"])
-  Float? hc_contamination = 0.0 
-  if (run_contamination && hasContamination_2 == "YES") {
-    if (contamination_major == 0.0) {
-      hc_contamination = contamination_minor
-    }
-    else if (defined(contamination_major)) {
-      hc_contamination = 1.0 - contamination_major
-    }
-  }
+  Float? hc_contamination = if run_contamination && hasContamination_2 == "YES" then (
+    if contamination_major == 0.0 then 
+      contamination_minor
+    else
+      1.0 - select_first([contamination_major])
+  ) else 0.0
   Float hc_contamination_2 = select_first([hc_contamination, 0.0])
-  Float? max_contamination = if defined(verifyBamID) then (if verifyBamID > hc_contamination_2 then verifyBamID else hc_contamination_2) else hc_contamination_2
+  Float? max_contamination = if defined(verifyBamID) then (
+    if select_first([verifyBamID]) > hc_contamination_2 then
+      verifyBamID
+    else
+      hc_contamination_2
+  ) else
+    hc_contamination_2
 
   meta {
     description: "Mutect2 Filtering for calling Snps and Indels"
