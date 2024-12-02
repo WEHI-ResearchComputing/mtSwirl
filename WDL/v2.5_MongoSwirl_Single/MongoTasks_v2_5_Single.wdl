@@ -3,7 +3,86 @@ version 1.0
 # that cannot handle a lot of parallel complexity. This is obviously hard to maintain.
 # These tasks are serial combinations of more modular tasks that were located in each individual WDL.
 
-task MongoSubsetBamToChrMAndRevert {
+task IndexStats {
+  input {
+    File this_bam
+    String sample_name
+    Int n_cpu
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    File idxstats = "${sample_name}.stats.tsv"
+  }
+  command <<<
+      /usr/bin/samtools \
+      idxstats \
+      ~{this_bam} \
+      --threads ~{n_cpu} \
+      > ~{sample_name}.stats.tsv
+  >>>
+}
+
+task Flagstat {
+  input {
+    File this_bam
+    String sample_name
+    Int n_cpu
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    File flagstat = "${sample_name}.flagstat.txt"
+  }
+  command <<<
+      /usr/bin/samtools \
+      flagstat \
+      ~{this_bam} \
+      --threads ~{n_cpu} \
+      > ~{sample_name}.flagstat.txt
+  >>>
+}
+
+task CollectQualityYieldMetrics {
+  input {
+    File this_bam
+    String sample_name
+    File ref_fasta
+    Int n_cpu
+    Int machine_mem
+    Int command_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    File yield_metrics = "${sample_name}.yield_metrics.txt"
+  }
+  command <<<
+    gatk --java-options "-Xmx~{command_mem}m" CollectQualityYieldMetrics \
+      -I ~{this_bam} \
+      ~{"-R " + ref_fasta} \
+      -O ~{sample_name}.yield_metrics.txt
+  >>>
+}
+
+task SubsetBamToChrM {
+  meta {
+    description: "Subsets a whole genome bam to just mitochondrial reads"
+  }
   input {
     File input_bam
     File? input_bai
@@ -12,37 +91,185 @@ task MongoSubsetBamToChrMAndRevert {
     File? mt_interval_list
     File? nuc_interval_list
     String? contig_name
-    String? requester_pays_project
     File? ref_fasta
     File? ref_fasta_index
     File? ref_dict
 
-    Boolean skip_restore_hardclips
+    String? printreads_extra_args
+
+    Int n_cpu
+    Int command_mem
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+
+  command <<<
+      gatk --java-options "-Xmx~{command_mem}m" PrintReads \
+      ~{"-R " + ref_fasta} \
+      ~{"-L " + mt_interval_list} \
+      ~{"-L " + nuc_interval_list} \
+      ~{"-L " + contig_name} \
+      --read-filter MateOnSameContigOrNoMappedMateReadFilter \
+      --read-filter MateUnmappedAndUnmappedReadFilter \
+      -I ~{input_bam} \
+      --read-index ~{input_bai} \
+      -O ~{sample_name}.bam ~{printreads_extra_args}
+    >>>
+  
+    output {
+      File output_bam = "${sample_name}.bam"
+    }
+}
+
+task CollectWgsMetrics {
+  meta {
+    description: "Calculates metrics on the subset BAM"
+  }
+  input {
+    String sample_name
+    File this_bam
+    File ref_fasta
+    File? mt_interval_list
+    Int read_length_for_optimization
+    Int? coverage_cap
+    Int n_cpu
+    Int command_mem
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    Int mean_coverage = read_int("${sample_name}.mean_coverage.txt")
+    Int median_coverage = read_int("${sample_name}.median_coverage.txt")
+    File wgs_metrics = "${sample_name}.wgs_metrics.txt"
+    File theoretical_sensitivity = "${sample_name}.theoretical_sensitivity.txt"
+  }
+  command <<<
+      gatk --java-options "-Xmx~{command_mem}m" CollectWgsMetrics \
+      INPUT="~{this_bam}" \
+      ~{"INTERVALS=" + mt_interval_list} \
+      VALIDATION_STRINGENCY=SILENT \
+      REFERENCE_SEQUENCE=~{ref_fasta} \
+      OUTPUT="~{sample_name}.wgs_metrics.txt" \
+      USE_FAST_ALGORITHM=true \
+      READ_LENGTH=~{read_length_for_optimization} \
+      ~{"COVERAGE_CAP=" + coverage_cap} \
+      INCLUDE_BQ_HISTOGRAM=true \
+      THEORETICAL_SENSITIVITY_OUTPUT="~{sample_name}.theoretical_sensitivity.txt"
+
+      R --vanilla <<CODE
+      df = read.table("~{sample_name}.wgs_metrics.txt",skip=6,header=TRUE,stringsAsFactors=FALSE,sep='\t',nrows=1)
+      write.table(floor(df[,"MEAN_COVERAGE"]), "~{sample_name}.mean_coverage.txt", quote=F, col.names=F, row.names=F)
+      write.table(df[,"MEDIAN_COVERAGE"], "~{sample_name}.median_coverage.txt", quote=F, col.names=F, row.names=F)
+    CODE
+  >>>
+}
+
+task MarkDuplicates {
+  input {
+    File this_bam
+    String sample_name
+    String? read_name_regex
+    Int n_cpu
+    Int command_mem
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  meta {
+    description: "Marks duplicates in the subset BAM"
+  }
+  output {
+    File md_bam = "${sample_name}.proc.bam"
+    File duplicate_metrics = "${sample_name}.duplicate.metrics"
+  }
+  command <<<
+      gatk --java-options "-Xmx~{command_mem}m" MarkDuplicates \
+      INPUT="~{this_bam}" \
+      OUTPUT=md.bam \
+      METRICS_FILE="~{sample_name}.duplicate.metrics" \
+      VALIDATION_STRINGENCY=SILENT \
+      ~{"READ_NAME_REGEX=" + read_name_regex} \
+      OPTICAL_DUPLICATE_PIXEL_DISTANCE=2500 \
+      ASSUME_SORT_ORDER="queryname" \
+      CLEAR_DT="false" \
+      ADD_PG_TAG_TO_READS=false
+  >>>
+}
+
+task SortBam {
+  input {
+    String sample_name
+    File this_bam
+    Int n_cpu
+    Int command_mem
+    Int machine_mem
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  meta {
+    description: "Sorts the subset BAM"
+  }
+  output {
+    File sorted_bam = "out/~{sample_name}.proc.bam"
+    File sorted_bai = "out/~{sample_name}.proc.bai"
+  }
+  command <<<
+      gatk --java-options "-Xmx~{command_mem}m" SortSam \
+      INPUT=~{this_bam} \
+      OUTPUT="~{sample_name}.proc.bam" \
+      SORT_ORDER="coordinate" \
+      CREATE_INDEX=true \
+      MAX_RECORDS_IN_RAM=300000
+    >>>
+}
+
+workflow MongoSubsetBamToChrMAndRevert {
+  input {
+    File input_bam
+    File input_bai
+    String sample_name
+    
+    File mt_interval_list
+    File nuc_interval_list
+    String? contig_name
+    File ref_fasta
+    File ref_fasta_index
+    File ref_dict
+
     String? read_name_regex
     Int? read_length
     Int? coverage_cap
 
-    File? gatk_override
     String? gatk_docker_override
     String gatk_version
     String? printreads_extra_args
 
     # runtime
-    Boolean force_manual_download # will download using gsutil cp
     Int? mem
-    Int? n_cpu
-    Int? preemptible_tries
+    Int n_cpu
   }
-  Float ref_size = if defined(ref_fasta) then size(ref_fasta, "GB") + size(ref_fasta_index, "GB") + size(ref_dict, "GB") else 0
-  String appended_bam = input_bam + '.crai'
-  Int disk_size = ceil(ref_size) + ceil(size(input_bam,'GB')) + 20
   Int read_length_for_optimization = select_first([read_length, 151])
   Int machine_mem = select_first([mem, 4])
   Int command_mem = (machine_mem * 1000) - 500
-  String skip_hardclip_str = if skip_restore_hardclips then "--RESTORE_HARDCLIPS false" else ""
-  String requester_pays_prefix = (if defined(requester_pays_project) then "-u " else "") + select_first([requester_pays_project, ""])
-
-  String d = "$" # a stupid trick to get ${} indexing in bash to work in Cromwell
+  String docker_image = select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:" + gatk_version])
   
   meta {
     description: "Subsets a whole genome bam to just Mitochondria reads"
@@ -56,305 +283,89 @@ task MongoSubsetBamToChrMAndRevert {
       localization_optional: true
     }
   }
-  command <<<
-    set -e
-    export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
-
-    mkdir out
-
-    this_bam="~{input_bam}"
-    this_bai="~{select_first([input_bai, appended_bam])}"
-    this_sample=out/"~{sample_name}"
-
-    ~{if force_manual_download then "gsutil " + requester_pays_prefix + " cp ~{d}{this_bam} bamfile.cram" else ""}
-    ~{if force_manual_download then "gsutil " + requester_pays_prefix + " cp ~{d}{this_bai} bamfile.cram.crai" else ""}
-    ~{if force_manual_download then "this_bam=bamfile.cram" else ""}
-    ~{if force_manual_download then "this_bai=bamfile.cram.crai" else ""}
-
-    /usr/bin/samtools-1.9/samtools \
-      idxstats \
-      "~{d}{this_bam}" \
-      --threads ~{default="1" n_cpu} \
-      > "~{d}{this_sample}.stats.tsv"
-
-    /usr/bin/samtools-1.9/samtools \
-      flagstat \
-      "~{d}{this_bam}" \
-      --threads ~{default="1" n_cpu} \
-      > "~{d}{this_sample}.flagstat.txt"
-
-    gatk CollectQualityYieldMetrics \
-      -I "~{d}{this_bam}" \
-      ~{"-R " + ref_fasta} \
-      -O "~{d}{this_sample}.yield_metrics.txt"
-    
-    gatk --java-options "-Xmx~{command_mem}m" PrintReads \
-      ~{"-R " + ref_fasta} \
-      ~{"-L " + mt_interval_list} \
-      ~{"-L " + nuc_interval_list} \
-      ~{"-L " + contig_name} \
-      --read-filter MateOnSameContigOrNoMappedMateReadFilter \
-      --read-filter MateUnmappedAndUnmappedReadFilter \
-      ~{"--gcs-project-for-requester-pays " + requester_pays_project} \
-      ~{if force_manual_download then '-I bamfile.cram --read-index bamfile.cram.crai' else "-I ~{d}{this_bam} --read-index ~{d}{this_bai}"} \
-      -O "~{d}{this_sample}.bam"  ~{printreads_extra_args}
-
-    echo "Now removing mapping..."
-    set +e
-    gatk --java-options "-Xmx~{command_mem}m" ValidateSamFile \
-      -INPUT "~{d}{this_sample}.bam" \
-      -O output.txt \
-      -M VERBOSE \
-      -IGNORE_WARNINGS true \
-      -MAX_OUTPUT 9999999
-    cat output.txt | \
-      grep 'ERROR.*Mate not found for paired read' | \
-      sed -e 's/ERROR::MATE_NOT_FOUND:Read name //g' | \
-      sed -e 's/, Mate not found for paired read//g' > read_list.txt
-    cat read_list.txt | wc -l | sed 's/^ *//g' > "~{d}{this_sample}.ct_failed.txt"
-    if [[ $(tr -d "\r\n" < read_list.txt|wc -c) -eq 0 ]]; then
-      cp "~{d}{this_sample}.bam" rescued.bam
-    else
-      gatk --java-options "-Xmx~{command_mem}m" FilterSamReads \
-        -I "~{d}{this_sample}.bam" \
-        -O rescued.bam \
-        -READ_LIST_FILE read_list.txt \
-        -FILTER excludeReadList
-    fi
-    gatk --java-options "-Xmx~{command_mem}m" RevertSam \
-      -INPUT rescued.bam \
-      -OUTPUT_BY_READGROUP false \
-      -OUTPUT "~{d}{this_sample}.unmap.bam" \
-      -VALIDATION_STRINGENCY LENIENT \
-      -ATTRIBUTE_TO_CLEAR FT \
-      -ATTRIBUTE_TO_CLEAR CO \
-      -SORT_ORDER queryname \
-      -RESTORE_ORIGINAL_QUALITIES false ~{skip_hardclip_str}
-
-    set -e
-    echo "Now getting WGS metrics on the subsetted bam..."
-    gatk --java-options "-Xmx~{command_mem}m" CollectWgsMetrics \
-      INPUT="~{d}{this_sample}.bam" \
-      ~{"INTERVALS=" + mt_interval_list} \
-      VALIDATION_STRINGENCY=SILENT \
-      REFERENCE_SEQUENCE=~{ref_fasta} \
-      OUTPUT="~{d}{this_sample}.wgs_metrics.txt" \
-      USE_FAST_ALGORITHM=true \
-      READ_LENGTH=~{read_length_for_optimization} \
-      ~{"COVERAGE_CAP=" + coverage_cap} \
-      INCLUDE_BQ_HISTOGRAM=true \
-      THEORETICAL_SENSITIVITY_OUTPUT="~{d}{this_sample}.theoretical_sensitivity.txt"
-
-    R --vanilla <<CODE
-      df = read.table("~{d}{this_sample}.wgs_metrics.txt",skip=6,header=TRUE,stringsAsFactors=FALSE,sep='\t',nrows=1)
-      write.table(floor(df[,"MEAN_COVERAGE"]), "~{d}{this_sample}.mean_coverage.txt", quote=F, col.names=F, row.names=F)
-      write.table(df[,"MEDIAN_COVERAGE"], "~{d}{this_sample}.median_coverage.txt", quote=F, col.names=F, row.names=F)
-    CODE
-
-    echo "Now preprocessing subsetted bam..."
-    gatk --java-options "-Xmx~{command_mem}m" MarkDuplicates \
-      INPUT="~{d}{this_sample}.bam" \
-      OUTPUT=md.bam \
-      METRICS_FILE="~{d}{this_sample}.duplicate.metrics" \
-      VALIDATION_STRINGENCY=SILENT \
-      ~{"READ_NAME_REGEX=" + read_name_regex} \
-      OPTICAL_DUPLICATE_PIXEL_DISTANCE=2500 \
-      ASSUME_SORT_ORDER="queryname" \
-      CLEAR_DT="false" \
-      ADD_PG_TAG_TO_READS=false
-
-    gatk --java-options "-Xmx~{command_mem}m" SortSam \
-      INPUT=md.bam \
-      OUTPUT="~{d}{this_sample}.proc.bam" \
-      SORT_ORDER="coordinate" \
-      CREATE_INDEX=true \
-      MAX_RECORDS_IN_RAM=300000
-  >>>
-  runtime {
-    memory: machine_mem + " GB"
-    disks: "local-disk " + disk_size + " HDD"
-    docker: select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:"+gatk_version])
-    preemptible: select_first([preemptible_tries, 5])
-    cpu: select_first([n_cpu,1])
+  call IndexStats {
+    input:
+      this_bam = input_bam,
+      sample_name = sample_name,
+      n_cpu = n_cpu,
+      machine_mem = machine_mem,
+      docker_image = docker_image
+  }
+  call Flagstat {
+    input:
+      this_bam = input_bam,
+      sample_name = sample_name,
+      n_cpu = n_cpu,
+      machine_mem = machine_mem,
+      docker_image = docker_image
+  }
+  call CollectQualityYieldMetrics {
+    input:
+      this_bam = input_bam,
+      sample_name = sample_name,
+      ref_fasta = ref_fasta,
+      n_cpu = n_cpu,
+      machine_mem = machine_mem,
+      command_mem = command_mem,
+      docker_image = docker_image
+  }
+  call SubsetBamToChrM {
+    input:
+      input_bam = input_bam,
+      input_bai = input_bai,
+      sample_name = sample_name,
+      mt_interval_list = mt_interval_list,
+      nuc_interval_list = nuc_interval_list,
+      contig_name = contig_name,
+      ref_fasta = ref_fasta,
+      ref_fasta_index = ref_fasta_index,
+      ref_dict = ref_dict,
+      printreads_extra_args = printreads_extra_args,
+      n_cpu = n_cpu,
+      machine_mem = machine_mem,
+      command_mem = command_mem,
+      docker_image = docker_image
+  }
+  call CollectWgsMetrics {
+    input:
+      this_bam = SubsetBamToChrM.output_bam,
+      sample_name = sample_name,
+      ref_fasta = ref_fasta,
+      mt_interval_list = mt_interval_list,
+      read_length_for_optimization = read_length_for_optimization,
+      coverage_cap = coverage_cap,
+      n_cpu = n_cpu,
+      command_mem = command_mem,
+      machine_mem = machine_mem,
+      docker_image = docker_image
+  }
+  call MarkDuplicates {
+    input:
+      this_bam = SubsetBamToChrM.output_bam,
+      sample_name = sample_name,
+      read_name_regex = read_name_regex,
+      n_cpu = n_cpu,
+      command_mem = command_mem,
+      machine_mem = machine_mem,
+      docker_image = docker_image
+  }
+  call SortBam {
+    input:
+      this_bam = MarkDuplicates.md_bam,
+      sample_name = sample_name,
+      n_cpu = n_cpu,
+      command_mem = command_mem,
+      machine_mem = machine_mem,
+      docker_image = docker_image
   }
   output {
-    File output_bam = "out/~{sample_name}.proc.bam"
-    File output_bai = "out/~{sample_name}.proc.bai"
-    File unmapped_bam = "out/~{sample_name}.unmap.bam"
-    File duplicate_metrics = "out/~{sample_name}.duplicate.metrics"
-    Int reads_dropped = read_int("out/~{sample_name}.ct_failed.txt")
-    Int mean_coverage = read_int("out/~{sample_name}.mean_coverage.txt")
-    File idxstats_metrics = "out/~{sample_name}.stats.tsv"
-    File yield_metrics = "out/~{sample_name}.yield_metrics.txt"
-    File flagstat = "out/~{sample_name}.flagstat.txt"
-  }
-}
-
-task MongoSubsetBamToChrMAndRevertFUSE {
-  input {
-    File input_bam
-    File? input_bai
-    String sample_name
-    
-    File? mt_interval_list
-    File? nuc_interval_list
-    String? contig_name
-    String? requester_pays_project
-    File? ref_fasta
-    File? ref_fasta_index
-    File? ref_dict
-
-    Boolean skip_restore_hardclips
-    String? read_name_regex
-    Int? read_length
-    Int? coverage_cap
-
-    File? gatk_override
-    String? gatk_docker_override
-    String gatk_version
-
-    # runtime
-    Boolean force_manual_download # will download using gsutil cp
-    Int? mem
-    Int? n_cpu
-    Int? preemptible_tries
-  }
-  Float ref_size = if defined(ref_fasta) then size(ref_fasta, "GB") + size(ref_fasta_index, "GB") + size(ref_dict, "GB") else 0
-  Int disk_size = ceil(ref_size) + ceil(size(input_bam,'GB')) + 20
-  Int read_length_for_optimization = select_first([read_length, 151])
-  Int machine_mem = select_first([mem, 4])
-  Int command_mem = (machine_mem * 1000) - 500
-  String skip_hardclip_str = if skip_restore_hardclips then "--RESTORE_HARDCLIPS false" else ""
-  String requester_pays_prefix = (if defined(requester_pays_project) then "-u " else "") + select_first([requester_pays_project, ""])
-
-  String d = "$" # a stupid trick to get ${} indexing in bash to work in Cromwell
-  
-  meta {
-    description: "Subsets a whole genome bam to just Mitochondria reads"
-  }
-  parameter_meta {
-    ref_fasta: "Reference is only required for cram input. If it is provided ref_fasta_index and ref_dict are also required."
-    input_bam: {
-      localization_optional: true
-    }
-    input_bai: {
-      localization_optional: true
-    }
-  }
-  command <<<
-    set -e
-    export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
-
-    ls -l /
-    ls -l /mnt
-
-    mkdir out
-
-    this_bam="~{input_bam}"
-    this_bai="~{select_first([input_bai, input_bam + '.crai'])}"
-    this_sample=out/"~{sample_name}"
-
-    ~{if force_manual_download then "gsutil " + requester_pays_prefix + " cp ~{d}{this_bam} bamfile.cram" else ""}
-    ~{if force_manual_download then "gsutil " + requester_pays_prefix + " cp ~{d}{this_bai} bamfile.cram.crai" else ""}
-    ~{if force_manual_download then "this_bam=bamfile.cram" else ""}
-    ~{if force_manual_download then "this_bai=bamfile.cram.crai" else ""}
-    
-    gatk --java-options "-Xmx~{command_mem}m" PrintReads \
-      ~{"-R " + ref_fasta} \
-      ~{"-L " + mt_interval_list} \
-      ~{"-L " + nuc_interval_list} \
-      ~{"-L " + contig_name} \
-      --read-filter MateOnSameContigOrNoMappedMateReadFilter \
-      --read-filter MateUnmappedAndUnmappedReadFilter \
-      ~{"--gcs-project-for-requester-pays " + requester_pays_project} \
-      ~{if force_manual_download then '-I bamfile.cram --read-index bamfile.cram.crai' else "-I ~{d}{this_bam} --read-index ~{d}{this_bai}"} \
-      -O "~{d}{this_sample}.bam"
-
-    echo "Now removing mapping..."
-    set +e
-    gatk --java-options "-Xmx~{command_mem}m" ValidateSamFile \
-      -INPUT "~{d}{this_sample}.bam" \
-      -O output.txt \
-      -M VERBOSE \
-      -IGNORE_WARNINGS true \
-      -MAX_OUTPUT 9999999
-    cat output.txt | \
-      grep 'ERROR.*Mate not found for paired read' | \
-      sed -e 's/ERROR::MATE_NOT_FOUND:Read name //g' | \
-      sed -e 's/, Mate not found for paired read//g' > read_list.txt
-    cat read_list.txt | wc -l | sed 's/^ *//g' > "~{d}{this_sample}.ct_failed.txt"
-    if [[ $(tr -d "\r\n" < read_list.txt|wc -c) -eq 0 ]]; then
-      cp "~{d}{this_sample}.bam" rescued.bam
-    else
-      gatk --java-options "-Xmx~{command_mem}m" FilterSamReads \
-        -I "~{d}{this_sample}.bam" \
-        -O rescued.bam \
-        -READ_LIST_FILE read_list.txt \
-        -FILTER excludeReadList
-    fi
-    gatk --java-options "-Xmx~{command_mem}m" RevertSam \
-      -INPUT rescued.bam \
-      -OUTPUT_BY_READGROUP false \
-      -OUTPUT "~{d}{this_sample}.unmap.bam" \
-      -VALIDATION_STRINGENCY LENIENT \
-      -ATTRIBUTE_TO_CLEAR FT \
-      -ATTRIBUTE_TO_CLEAR CO \
-      -SORT_ORDER queryname \
-      -RESTORE_ORIGINAL_QUALITIES false ~{skip_hardclip_str}
-
-    set -e
-    echo "Now getting WGS metrics on the subsetted bam..."
-    gatk --java-options "-Xmx~{command_mem}m" CollectWgsMetrics \
-      INPUT="~{d}{this_sample}.bam" \
-      ~{"INTERVALS=" + mt_interval_list} \
-      VALIDATION_STRINGENCY=SILENT \
-      REFERENCE_SEQUENCE=~{ref_fasta} \
-      OUTPUT="~{d}{this_sample}.wgs_metrics.txt" \
-      USE_FAST_ALGORITHM=true \
-      READ_LENGTH=~{read_length_for_optimization} \
-      ~{"COVERAGE_CAP=" + coverage_cap} \
-      INCLUDE_BQ_HISTOGRAM=true \
-      THEORETICAL_SENSITIVITY_OUTPUT="~{d}{this_sample}.theoretical_sensitivity.txt"
-
-    R --vanilla <<CODE
-      df = read.table("~{d}{this_sample}.wgs_metrics.txt",skip=6,header=TRUE,stringsAsFactors=FALSE,sep='\t',nrows=1)
-      write.table(floor(df[,"MEAN_COVERAGE"]), "~{d}{this_sample}.mean_coverage.txt", quote=F, col.names=F, row.names=F)
-      write.table(df[,"MEDIAN_COVERAGE"], "~{d}{this_sample}.median_coverage.txt", quote=F, col.names=F, row.names=F)
-    CODE
-
-    echo "Now preprocessing subsetted bam..."
-    gatk --java-options "-Xmx~{command_mem}m" MarkDuplicates \
-      INPUT="~{d}{this_sample}.bam" \
-      OUTPUT=md.bam \
-      METRICS_FILE="~{d}{this_sample}.duplicate.metrics" \
-      VALIDATION_STRINGENCY=SILENT \
-      ~{"READ_NAME_REGEX=" + read_name_regex} \
-      OPTICAL_DUPLICATE_PIXEL_DISTANCE=2500 \
-      ASSUME_SORT_ORDER="queryname" \
-      CLEAR_DT="false" \
-      ADD_PG_TAG_TO_READS=false
-
-    gatk --java-options "-Xmx~{command_mem}m" SortSam \
-      INPUT=md.bam \
-      OUTPUT="~{d}{this_sample}.proc.bam" \
-      SORT_ORDER="coordinate" \
-      CREATE_INDEX=true \
-      MAX_RECORDS_IN_RAM=300000
-  >>>
-  runtime {
-    memory: machine_mem + " GB"
-    disks: "local-disk " + disk_size + " HDD"
-    docker: select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:"+gatk_version])
-    preemptible: select_first([preemptible_tries, 5])
-    cpu: select_first([n_cpu,1])
-  }
-  output {
-    File output_bam = "out/~{sample_name}.proc.bam"
-    File output_bai = "out/~{sample_name}.proc.bai"
-    File unmapped_bam = "out/~{sample_name}.unmap.bam"
-    File duplicate_metrics = "out/~{sample_name}.duplicate.metrics"
-    Int reads_dropped = read_int("out/~{sample_name}.ct_failed.txt")
-    Int mean_coverage = read_int("out/~{sample_name}.mean_coverage.txt")
+    File output_bam = SortBam.sorted_bam
+    File output_bai = SortBam.sorted_bai
+    File duplicate_metrics = MarkDuplicates.duplicate_metrics
+    Int mean_coverage = CollectWgsMetrics.mean_coverage
+    File idxstats_metrics = IndexStats.idxstats
+    File yield_metrics = CollectQualityYieldMetrics.yield_metrics
+    File flagstat = Flagstat.flagstat
   }
 }
 
