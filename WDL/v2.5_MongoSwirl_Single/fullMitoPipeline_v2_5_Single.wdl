@@ -15,7 +15,7 @@ workflow MitochondriaPipeline {
 
   input {
     File wgs_aligned_input_bam_or_cram
-    File? wgs_aligned_input_bam_or_cram_index
+    File wgs_aligned_input_bam_or_cram_index
     String sample_name
 
     File mt_interval_list
@@ -73,10 +73,8 @@ workflow MitochondriaPipeline {
     #Optional runtime arguments
     Int? printreads_mem
     Int? lift_coverage_mem
-    Int? n_cpu_subsetbam
-    Int? n_cpu_m2_hc_lift
-    Int? n_cpu_bwa
     Int? preemptible_tries
+    Int n_cpu_m2_hc_lift = 1
   }
 
   parameter_meta {
@@ -100,18 +98,11 @@ workflow MitochondriaPipeline {
       ref_fasta = ref_fasta,
       ref_fasta_index = ref_fasta_index,
       ref_dict = ref_dict,
-      requester_pays_project = requester_pays_project,
-      gatk_override = gatk_override,
       gatk_docker_override = gatk_samtools_docker,
       gatk_version = gatk_version,
       printreads_extra_args = printreads_extra_args,
-      force_manual_download = force_manual_download,
       read_length = max_read_length,
-      skip_restore_hardclips = skip_restore_hardclips,
       coverage_cap = 100000,
-      mem = printreads_mem,
-      n_cpu = n_cpu_subsetbam,
-      preemptible_tries = preemptible_tries
   }
 
   call AlignAndCallR1_Single.AlignAndCallR1 as AlignAndCallR1 {

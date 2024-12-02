@@ -7,8 +7,8 @@ task IndexStats {
   input {
     File this_bam
     String sample_name
-    Int n_cpu
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
     String docker_image
   }
   runtime {
@@ -32,8 +32,8 @@ task Flagstat {
   input {
     File this_bam
     String sample_name
-    Int n_cpu
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
     String docker_image
   }
   runtime {
@@ -58,9 +58,9 @@ task CollectQualityYieldMetrics {
     File this_bam
     String sample_name
     File ref_fasta
-    Int n_cpu
-    Int machine_mem
-    Int command_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
   runtime {
@@ -97,9 +97,9 @@ task SubsetBamToChrM {
 
     String? printreads_extra_args
 
-    Int n_cpu
-    Int command_mem
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
   runtime {
@@ -137,9 +137,9 @@ task CollectWgsMetrics {
     File? mt_interval_list
     Int read_length_for_optimization
     Int? coverage_cap
-    Int n_cpu
-    Int command_mem
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
   runtime {
@@ -179,9 +179,9 @@ task MarkDuplicates {
     File this_bam
     String sample_name
     String? read_name_regex
-    Int n_cpu
-    Int command_mem
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
   runtime {
@@ -214,9 +214,9 @@ task SortBam {
   input {
     String sample_name
     File this_bam
-    Int n_cpu
-    Int command_mem
-    Int machine_mem
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
   runtime {
@@ -261,14 +261,8 @@ workflow MongoSubsetBamToChrMAndRevert {
     String? gatk_docker_override
     String gatk_version
     String? printreads_extra_args
-
-    # runtime
-    Int? mem
-    Int n_cpu
   }
   Int read_length_for_optimization = select_first([read_length, 151])
-  Int machine_mem = select_first([mem, 4])
-  Int command_mem = (machine_mem * 1000) - 500
   String docker_image = select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:" + gatk_version])
   
   meta {
@@ -287,16 +281,12 @@ workflow MongoSubsetBamToChrMAndRevert {
     input:
       this_bam = input_bam,
       sample_name = sample_name,
-      n_cpu = n_cpu,
-      machine_mem = machine_mem,
       docker_image = docker_image
   }
   call Flagstat {
     input:
       this_bam = input_bam,
       sample_name = sample_name,
-      n_cpu = n_cpu,
-      machine_mem = machine_mem,
       docker_image = docker_image
   }
   call CollectQualityYieldMetrics {
@@ -304,9 +294,6 @@ workflow MongoSubsetBamToChrMAndRevert {
       this_bam = input_bam,
       sample_name = sample_name,
       ref_fasta = ref_fasta,
-      n_cpu = n_cpu,
-      machine_mem = machine_mem,
-      command_mem = command_mem,
       docker_image = docker_image
   }
   call SubsetBamToChrM {
@@ -321,9 +308,6 @@ workflow MongoSubsetBamToChrMAndRevert {
       ref_fasta_index = ref_fasta_index,
       ref_dict = ref_dict,
       printreads_extra_args = printreads_extra_args,
-      n_cpu = n_cpu,
-      machine_mem = machine_mem,
-      command_mem = command_mem,
       docker_image = docker_image
   }
   call CollectWgsMetrics {
@@ -334,9 +318,6 @@ workflow MongoSubsetBamToChrMAndRevert {
       mt_interval_list = mt_interval_list,
       read_length_for_optimization = read_length_for_optimization,
       coverage_cap = coverage_cap,
-      n_cpu = n_cpu,
-      command_mem = command_mem,
-      machine_mem = machine_mem,
       docker_image = docker_image
   }
   call MarkDuplicates {
@@ -344,18 +325,12 @@ workflow MongoSubsetBamToChrMAndRevert {
       this_bam = SubsetBamToChrM.output_bam,
       sample_name = sample_name,
       read_name_regex = read_name_regex,
-      n_cpu = n_cpu,
-      command_mem = command_mem,
-      machine_mem = machine_mem,
       docker_image = docker_image
   }
   call SortBam {
     input:
       this_bam = MarkDuplicates.md_bam,
       sample_name = sample_name,
-      n_cpu = n_cpu,
-      command_mem = command_mem,
-      machine_mem = machine_mem,
       docker_image = docker_image
   }
   output {
