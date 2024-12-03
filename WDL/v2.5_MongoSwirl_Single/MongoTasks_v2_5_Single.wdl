@@ -241,6 +241,84 @@ task SortBam {
     >>>
 }
 
+task RescueBam {
+  input {
+    String sample_name
+    File input_bam
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    File rescued_bam = "rescued.bam"
+    Int reads_dropped = read_int("${sample_name}.ct_failed.txt")
+  }
+  meta {
+    description: "Extracts a BAM file containing reads with missing mates"
+  }
+  command <<<
+    gatk --java-options "-Xmx~{command_mem}m" ValidateSamFile \
+      -INPUT "~{input_bam}" \
+      -O output.txt \
+      -M VERBOSE \
+      -IGNORE_WARNINGS true \
+      -MAX_OUTPUT 9999999
+    cat output.txt | \
+      grep 'ERROR.*Mate not found for paired read' | \
+      sed -e 's/ERROR::MATE_NOT_FOUND:Read name //g' | \
+      sed -e 's/, Mate not found for paired read//g' > read_list.txt
+    cat read_list.txt | wc -l | sed 's/^ *//g' > "~{sample_name}.ct_failed.txt"
+    if [[ $(tr -d "\r\n" < read_list.txt|wc -c) -eq 0 ]]; then
+      cp "~{sample_name}.bam" rescued.bam
+    else
+      gatk --java-options "-Xmx~{command_mem}m" FilterSamReads \
+        -I "~{sample_name}.bam" \
+        -O rescued.bam \
+        -READ_LIST_FILE read_list.txt \
+        -FILTER excludeReadList
+    fi
+  >>>
+}
+
+task RevertBam {
+  input {
+    String sample_name
+    File input_bam
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
+    String docker_image
+  }
+  meta {
+    description: "Reverts the rescued BAM containing read pairs where only one pair mapped to chrM back to an unmapped BAM"
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+  }
+  output {
+    File reverted_bam = "reverted.bam"
+  }
+  command <<<
+      gatk --java-options "-Xmx~{command_mem}m" RevertSam \
+      -INPUT ~{input_bam} \
+      -OUTPUT_BY_READGROUP false \
+      -OUTPUT "~{sample_name}.unmap.bam" \
+      -VALIDATION_STRINGENCY LENIENT \
+      -ATTRIBUTE_TO_CLEAR FT \
+      -ATTRIBUTE_TO_CLEAR CO \
+      -SORT_ORDER queryname \
+      -RESTORE_ORIGINAL_QUALITIES false
+    >>>
+}
+
 workflow MongoSubsetBamToChrMAndRevert {
   input {
     File input_bam
@@ -333,6 +411,18 @@ workflow MongoSubsetBamToChrMAndRevert {
       sample_name = sample_name,
       docker_image = docker_image
   }
+  call RescueBam {
+    input:
+      sample_name = sample_name,
+      input_bam = SubsetBamToChrM.output_bam,
+      docker_image = docker_image
+  }
+  call RevertBam {
+    input:
+      sample_name = sample_name,
+      input_bam = RescueBam.rescued_bam,
+      docker_image = docker_image
+  }
   output {
     File output_bam = SortBam.sorted_bam
     File output_bai = SortBam.sorted_bai
@@ -341,6 +431,8 @@ workflow MongoSubsetBamToChrMAndRevert {
     File idxstats_metrics = IndexStats.idxstats
     File yield_metrics = CollectQualityYieldMetrics.yield_metrics
     File flagstat = Flagstat.flagstat
+    File unmapped_bam = RevertBam.reverted_bam
+    Int reads_dropped = RescueBam.reads_dropped
   }
 }
 

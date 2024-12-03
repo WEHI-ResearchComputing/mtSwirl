@@ -75,6 +75,7 @@ workflow MitochondriaPipeline {
     Int? lift_coverage_mem
     Int? preemptible_tries
     Int n_cpu_m2_hc_lift = 1
+    Int n_cpu_bwa = 1
   }
 
   parameter_meta {
