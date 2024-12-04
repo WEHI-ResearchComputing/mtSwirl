@@ -5,7 +5,8 @@ version 1.0
 
 task IndexStats {
   input {
-    File this_bam
+    File alignment
+    File alignment_index
     String sample_name
     Int n_cpu = 1
     Int machine_mem = 4
@@ -15,6 +16,7 @@ task IndexStats {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   output {
     File idxstats = "${sample_name}.stats.tsv"
@@ -22,7 +24,7 @@ task IndexStats {
   command <<<
       /usr/bin/samtools \
       idxstats \
-      ~{this_bam} \
+      ~{alignment} \
       --threads ~{n_cpu} \
       > ~{sample_name}.stats.tsv
   >>>
@@ -30,7 +32,8 @@ task IndexStats {
 
 task Flagstat {
   input {
-    File this_bam
+    File alignment
+    File alignment_index
     String sample_name
     Int n_cpu = 1
     Int machine_mem = 4
@@ -40,6 +43,7 @@ task Flagstat {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 10
   }
   output {
     File flagstat = "${sample_name}.flagstat.txt"
@@ -47,7 +51,7 @@ task Flagstat {
   command <<<
       /usr/bin/samtools \
       flagstat \
-      ~{this_bam} \
+      ~{alignment} \
       --threads ~{n_cpu} \
       > ~{sample_name}.flagstat.txt
   >>>
@@ -55,11 +59,13 @@ task Flagstat {
 
 task CollectQualityYieldMetrics {
   input {
-    File this_bam
+    File alignment
+    File alignment_index
     String sample_name
     File ref_fasta
+    File ref_fasta_index
     Int n_cpu = 1
-    Int machine_mem = 4
+    Int machine_mem = 8
     Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
@@ -67,14 +73,15 @@ task CollectQualityYieldMetrics {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 240
   }
   output {
     File yield_metrics = "${sample_name}.yield_metrics.txt"
   }
   command <<<
     gatk --java-options "-Xmx~{command_mem}m" CollectQualityYieldMetrics \
-      -I ~{this_bam} \
-      ~{"-R " + ref_fasta} \
+      -I ~{alignment} \
+      -R ~{ref_fasta} \
       -O ~{sample_name}.yield_metrics.txt
   >>>
 }
@@ -98,14 +105,16 @@ task SubsetBamToChrM {
     String? printreads_extra_args
 
     Int n_cpu = 1
-    Int machine_mem = 4
+    Int machine_mem = 8
     Int command_mem = (machine_mem * 1000) - 500
     String docker_image
+    Int walltime = 5
   }
   runtime {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: walltime
   }
 
   command <<<
@@ -132,13 +141,15 @@ task CollectWgsMetrics {
   }
   input {
     String sample_name
-    File this_bam
+    File alignment
+    File alignment_index
     File ref_fasta
+    File ref_fasta_index
     File? mt_interval_list
     Int read_length_for_optimization
     Int? coverage_cap
     Int n_cpu = 1
-    Int machine_mem = 4
+    Int machine_mem = 8
     Int command_mem = (machine_mem * 1000) - 500
     String docker_image
   }
@@ -146,6 +157,7 @@ task CollectWgsMetrics {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   output {
     Int mean_coverage = read_int("${sample_name}.mean_coverage.txt")
@@ -155,7 +167,7 @@ task CollectWgsMetrics {
   }
   command <<<
       gatk --java-options "-Xmx~{command_mem}m" CollectWgsMetrics \
-      INPUT="~{this_bam}" \
+      INPUT="~{alignment}" \
       ~{"INTERVALS=" + mt_interval_list} \
       VALIDATION_STRINGENCY=SILENT \
       REFERENCE_SEQUENCE=~{ref_fasta} \
@@ -176,7 +188,8 @@ task CollectWgsMetrics {
 
 task MarkDuplicates {
   input {
-    File this_bam
+    File alignment
+    File alignment_index
     String sample_name
     String? read_name_regex
     Int n_cpu = 1
@@ -188,18 +201,19 @@ task MarkDuplicates {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   meta {
     description: "Marks duplicates in the subset BAM"
   }
   output {
-    File md_bam = "${sample_name}.proc.bam"
+    File md_bam = "${sample_name}.md.bam"
     File duplicate_metrics = "${sample_name}.duplicate.metrics"
   }
   command <<<
       gatk --java-options "-Xmx~{command_mem}m" MarkDuplicates \
-      INPUT="~{this_bam}" \
-      OUTPUT=md.bam \
+      INPUT="~{alignment}" \
+      OUTPUT=~{sample_name}.md.bam \
       METRICS_FILE="~{sample_name}.duplicate.metrics" \
       VALIDATION_STRINGENCY=SILENT \
       ~{"READ_NAME_REGEX=" + read_name_regex} \
@@ -213,7 +227,8 @@ task MarkDuplicates {
 task SortBam {
   input {
     String sample_name
-    File this_bam
+    File alignment
+    File alignment_index
     Int n_cpu = 1
     Int machine_mem = 4
     Int command_mem = (machine_mem * 1000) - 500
@@ -223,17 +238,18 @@ task SortBam {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   meta {
     description: "Sorts the subset BAM"
   }
   output {
-    File sorted_bam = "out/~{sample_name}.proc.bam"
-    File sorted_bai = "out/~{sample_name}.proc.bai"
+    File sorted_bam = "${sample_name}.proc.bam"
+    File sorted_bai = "${sample_name}.proc.bai"
   }
   command <<<
       gatk --java-options "-Xmx~{command_mem}m" SortSam \
-      INPUT=~{this_bam} \
+      INPUT=~{alignment} \
       OUTPUT="~{sample_name}.proc.bam" \
       SORT_ORDER="coordinate" \
       CREATE_INDEX=true \
@@ -244,7 +260,8 @@ task SortBam {
 task RescueBam {
   input {
     String sample_name
-    File input_bam
+    File alignment
+    File alignment_index
     Int n_cpu = 1
     Int machine_mem = 4
     Int command_mem = (machine_mem * 1000) - 500
@@ -254,6 +271,7 @@ task RescueBam {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   output {
     File rescued_bam = "rescued.bam"
@@ -264,7 +282,7 @@ task RescueBam {
   }
   command <<<
     gatk --java-options "-Xmx~{command_mem}m" ValidateSamFile \
-      -INPUT "~{input_bam}" \
+      -INPUT "~{alignment}" \
       -O output.txt \
       -M VERBOSE \
       -IGNORE_WARNINGS true \
@@ -275,10 +293,10 @@ task RescueBam {
       sed -e 's/, Mate not found for paired read//g' > read_list.txt
     cat read_list.txt | wc -l | sed 's/^ *//g' > "~{sample_name}.ct_failed.txt"
     if [[ $(tr -d "\r\n" < read_list.txt|wc -c) -eq 0 ]]; then
-      cp "~{sample_name}.bam" rescued.bam
+      cp "~{alignment}" rescued.bam
     else
       gatk --java-options "-Xmx~{command_mem}m" FilterSamReads \
-        -I "~{sample_name}.bam" \
+        -I "~{alignment}" \
         -O rescued.bam \
         -READ_LIST_FILE read_list.txt \
         -FILTER excludeReadList
@@ -289,7 +307,7 @@ task RescueBam {
 task RevertBam {
   input {
     String sample_name
-    File input_bam
+    File alignment
     Int n_cpu = 1
     Int machine_mem = 4
     Int command_mem = (machine_mem * 1000) - 500
@@ -302,13 +320,14 @@ task RevertBam {
     memory: machine_mem + " GB"
     docker: docker_image
     cpu: n_cpu
+    time_minutes: 5
   }
   output {
-    File reverted_bam = "reverted.bam"
+    File reverted_bam = "${sample_name}.unmap.bam"
   }
   command <<<
       gatk --java-options "-Xmx~{command_mem}m" RevertSam \
-      -INPUT ~{input_bam} \
+      -INPUT ~{alignment} \
       -OUTPUT_BY_READGROUP false \
       -OUTPUT "~{sample_name}.unmap.bam" \
       -VALIDATION_STRINGENCY LENIENT \
@@ -357,21 +376,25 @@ workflow MongoSubsetBamToChrMAndRevert {
   }
   call IndexStats {
     input:
-      this_bam = input_bam,
+      alignment = input_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       docker_image = docker_image
   }
   call Flagstat {
     input:
-      this_bam = input_bam,
+      alignment = input_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       docker_image = docker_image
   }
   call CollectQualityYieldMetrics {
     input:
-      this_bam = input_bam,
+      alignment = input_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       ref_fasta = ref_fasta,
+      ref_fasta_index = ref_fasta_index,
       docker_image = docker_image
   }
   call SubsetBamToChrM {
@@ -390,9 +413,11 @@ workflow MongoSubsetBamToChrMAndRevert {
   }
   call CollectWgsMetrics {
     input:
-      this_bam = SubsetBamToChrM.output_bam,
+      alignment = SubsetBamToChrM.output_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       ref_fasta = ref_fasta,
+      ref_fasta_index = ref_fasta_index,
       mt_interval_list = mt_interval_list,
       read_length_for_optimization = read_length_for_optimization,
       coverage_cap = coverage_cap,
@@ -400,27 +425,30 @@ workflow MongoSubsetBamToChrMAndRevert {
   }
   call MarkDuplicates {
     input:
-      this_bam = SubsetBamToChrM.output_bam,
+      alignment = SubsetBamToChrM.output_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       read_name_regex = read_name_regex,
       docker_image = docker_image
   }
   call SortBam {
     input:
-      this_bam = MarkDuplicates.md_bam,
+      alignment = MarkDuplicates.md_bam,
+      alignment_index = input_bai,
       sample_name = sample_name,
       docker_image = docker_image
   }
   call RescueBam {
     input:
       sample_name = sample_name,
-      input_bam = SubsetBamToChrM.output_bam,
+      alignment = SubsetBamToChrM.output_bam,
+      alignment_index = input_bai,
       docker_image = docker_image
   }
   call RevertBam {
     input:
       sample_name = sample_name,
-      input_bam = RescueBam.rescued_bam,
+      alignment = RescueBam.rescued_bam,
       docker_image = docker_image
   }
   output {
@@ -472,7 +500,7 @@ task MongoProduceSelfReference {
   command <<<
     set -e
 
-    mkdir out
+    mkdir -p out
 
     java -jar /usr/gitc/picard.jar IntervalListTools SORT=true I=~{mt_interval_list} O=internal_mt.interval_list
     java -jar /usr/gitc/picard.jar IntervalListTools SORT=true I=~{nuc_interval_list} O=internal_nuc.interval_list
@@ -808,7 +836,7 @@ task MongoChainSwapLiftoverBed {
   command <<<
     set -e
 
-    mkdir out
+    mkdir -p out
 
     this_chain="~{source_chain}"
     this_target_sample="~{input_target_name}"
@@ -882,7 +910,7 @@ task MongoHC {
 
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
 
-    mkdir out
+    mkdir -p out
     this_sample=out/"~{sample_name}"
     this_basename="~{d}{this_sample}""~{suffix}"
     bamoutfile="~{d}{this_basename}.bamout.bam"
@@ -1049,7 +1077,7 @@ task MongoNucM2 {
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
     echo "Extra arguments for mutect2: ""~{m2_extra_args}""$cust_interval"
 
-    mkdir out
+    mkdir -p out
     this_sample=out/"~{sample_name}"
     this_contamination="~{select_first([verifyBamID, defval])}"
     this_bam="~{input_bam}"
@@ -1197,7 +1225,7 @@ task MongoRunM2InitialFilterSplit {
     echo "Extra arguments for mutect2: ""~{m2_extra_args}""$cust_interval"
 
     # We need to create these files regardless, even if they stay empty
-    mkdir out
+    mkdir -p out
     this_sample=out/"~{sample_name}"
     this_contamination="~{select_first([verifyBamID, defval])}"
     this_basename="~{d}{this_sample}~{suffix}"
@@ -1335,7 +1363,7 @@ task MongoM2FilterContaminationSplit {
 
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
 
-    mkdir out
+    mkdir -p out
     
     this_sample=out/"~{sample_name}"
     this_raw_vcf="~{raw_vcf}"
@@ -1474,7 +1502,7 @@ task MongoAlignToMtRegShiftedAndMetrics {
     set -o pipefail
     set -e
 
-    mkdir out
+    mkdir -p out
 
     this_sample=out/"~{sample_base_name}~{suffix}"
     this_bam="~{input_bam}"
@@ -1730,7 +1758,7 @@ task MongoCallMtAndShifted {
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
     echo "Extra arguments for mutect2: ""~{m2_extra_args}""$cust_interval"
 
-    mkdir out
+    mkdir -p out
 
     this_sample=out/"~{sample_base_name}~{suffix}"
 
@@ -1872,7 +1900,7 @@ task MongoLiftoverCombineMergeFilterContamSplit {
 
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
 
-    mkdir out
+    mkdir -p out
 
     this_sample=out/"~{sample_base_name}~{suffix}"
     this_shifted_vcf="~{shifted_vcf}"
@@ -2029,7 +2057,7 @@ task MongoLiftoverVCFAndGetCoverage {
   command <<<
     set -e
 
-    mkdir out
+    mkdir -p out
 
     this_sample_name="~{sample_name}"
     this_self_ref_vcf="~{new_self_ref_vcf}"
@@ -2252,7 +2280,7 @@ task MongoLiftoverSelfAndCollectOutputs {
   command <<<
     set -e
 
-    mkdir out
+    mkdir -p out
 
     this_sample=out/"~{sample_name}"
     this_chain="~{chain}"
