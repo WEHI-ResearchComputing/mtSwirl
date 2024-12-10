@@ -51,6 +51,7 @@ workflow AlignAndCallR1 {
 
   parameter_meta {
   }
+  String docker_image = select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:" + gatk_version])
 
   if (use_haplotype_caller_nucdna) {
     call MongoTasks_Single.MongoHC as CallNucHCIntegrated {
@@ -156,9 +157,7 @@ workflow AlignAndCallR1 {
       ref_fai = mt_fasta_index,
       ref_dict = mt_dict,
       compress = compress_output_vcf,
-      gatk_override = gatk_override,
-      gatk_docker_override = gatk_docker_override,
-      gatk_version = gatk_version,
+      docker_image = docker_image,
       m2_extra_filtering_args = select_first([m2_filter_extra_args, ""]) + " --min-median-mapping-quality 0",
       max_alt_allele_count = 4,
       vaf_filter_threshold = vaf_filter_threshold,

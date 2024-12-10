@@ -1327,12 +1327,19 @@ task MongoM2FilterContaminationSplit {
     File? blacklisted_sites
     File? blacklisted_sites_index
 
-    File? gatk_override
-    String? gatk_docker_override
-    String gatk_version
-
   # runtime
     Int? preemptible_tries
+
+    Int n_cpu = 1
+    Int machine_mem = 4
+    Int command_mem = (machine_mem * 1000) - 500
+    String docker_image
+  }
+  runtime {
+    memory: machine_mem + " GB"
+    docker: docker_image
+    cpu: n_cpu
+    time_minutes: 5
   }
 
   Float ref_size = size(ref_fasta, "GB") + size(ref_fai, "GB")
@@ -1360,8 +1367,6 @@ task MongoM2FilterContaminationSplit {
 
   command <<<
     set -e
-
-    export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_override}
 
     mkdir -p out
     
@@ -1428,13 +1433,6 @@ task MongoM2FilterContaminationSplit {
       --create-output-variant-index
         
   >>>
-  runtime {
-      docker: select_first([gatk_docker_override, "us.gcr.io/broad-gatk/gatk:"+gatk_version])
-      memory: "4 MB"
-      disks: "local-disk " + disk_size + " HDD"
-      preemptible: select_first([preemptible_tries, 5])
-      cpu: 2
-  }
   output {
     File filtered_vcf = "out/~{sample_name}~{suffix}.vcf"
     File filtered_vcf_idx = "out/~{sample_name}~{suffix}.vcf.idx"
@@ -1671,11 +1669,10 @@ task MongoAlignToMtRegShiftedAndMetrics {
     CODE
   >>>
   runtime {
-    preemptible: select_first([preemptible_tries, 5])
-    memory: "6 GB"
+    memory: "20 GB"
     cpu: this_cpu
-    disks: "local-disk " + disk_size + " HDD"
     docker: "us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.4.2-1552931386"
+    returnCodes: "*"
   }
   output {
     File mt_aligned_bam = "out/~{this_output_bam_basename}.bam"

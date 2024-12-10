@@ -65,7 +65,7 @@ workflow ProduceSelfReferenceFiles {
 
     #Optional runtime arguments
     Int? preemptible_tries
-    File genomes_cloud_docker
+    String genomes_cloud_docker
     String ucsc_docker
   }
 
