@@ -1414,8 +1414,6 @@ task MongoM2FilterContaminationSplit {
       ~{"--f-score-beta " + f_score_beta} \
       --contamination-estimate "~{d}{this_max_contamination}"
 
-    ~{"gatk IndexFeatureFile -I " + blacklisted_sites}
-
     gatk --java-options "-Xmx2500m" VariantFiltration \
       -V filtered.vcf \
       -O "~{d}{this_basename}.vcf" \
