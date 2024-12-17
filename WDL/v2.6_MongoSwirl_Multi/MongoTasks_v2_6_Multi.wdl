@@ -1303,8 +1303,6 @@ task MongoNucM2 {
         ~{"--f-score-beta " + f_score_beta} \
         --contamination-estimate "~{d}{this_contamination}"
 
-      ~{"gatk IndexFeatureFile -I " + blacklisted_sites}
-
       gatk --java-options "-Xmx~{command_mem}m" VariantFiltration -V filtered.vcf \
         -O "~{d}{this_basename}.vcf" \
         --apply-allele-specific-filters \
@@ -1485,8 +1483,6 @@ task MongoRunM2InitialFilterSplit {
         ~{"--f-score-beta " + f_score_beta} \
         --contamination-estimate "~{d}{this_contamination}"
 
-      ~{"gatk IndexFeatureFile -I " + blacklisted_sites}
-
       gatk --java-options "-Xmx~{command_mem}m" VariantFiltration -V filtered.vcf \
         -O "~{d}{this_basename}.filtered.vcf" \
         --apply-allele-specific-filters \
@@ -1660,8 +1656,6 @@ task MongoM2FilterContaminationSplit {
         ~{"--min-allele-fraction " + vaf_filter_threshold} \
         ~{"--f-score-beta " + f_score_beta} \
         --contamination-estimate "~{d}{this_max_contamination}"
-
-      ~{"gatk IndexFeatureFile -I " + blacklisted_sites}
 
       gatk --java-options "-Xmx2500m" VariantFiltration \
         -V filtered.vcf \
@@ -2335,8 +2329,6 @@ task MongoLiftoverCombineMergeFilterContamSplit {
         ~{"--min-allele-fraction " + vaf_filter_threshold} \
         ~{"--f-score-beta " + f_score_beta} \
         --contamination-estimate "~{d}{this_max_contamination}"
-
-      gatk IndexFeatureFile -I "~{d}{this_blacklisted}"
 
       gatk --java-options "-Xmx1000m" VariantFiltration -V filtered.vcf \
         -O "~{d}{this_sample}.vcf" \

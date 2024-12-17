@@ -476,8 +476,6 @@ task Filter {
         ~{"--f-score-beta " + f_score_beta} \
         ~{"--contamination-estimate " + max_contamination}
 
-      ~{"gatk IndexFeatureFile -I " + blacklisted_sites}
-
       gatk VariantFiltration -V filtered.vcf \
         -O ~{output_vcf} \
         --apply-allele-specific-filters \
