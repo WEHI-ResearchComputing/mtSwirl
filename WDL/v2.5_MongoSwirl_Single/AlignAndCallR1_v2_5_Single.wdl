@@ -335,9 +335,6 @@ task M2 {
       # We need to create these files regardless, even if they stay empty
       touch bamout.bam
 
-      # Fix for DNANexus weirdness
-      ~{"gatk IndexFeatureFile -I " + force_call_vcf}
-
       gatk --java-options "-Xmx~{command_mem}m" Mutect2 \
         -R ~{ref_fasta} \
         -I ~{input_bam} \

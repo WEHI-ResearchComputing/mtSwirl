@@ -2098,9 +2098,6 @@ task MongoCallMtAndShifted {
 
       echo "Obtaining force calls for specified VCF: ~{d}{this_force_vcf}"
 
-      # Fix for DNANexus weirdness
-      gatk IndexFeatureFile -I "~{d}{this_force_vcf}"
-
       gatk --java-options "-Xmx~{command_mem}m" Mutect2 \
         -R "~{d}{this_self_fasta}" \
         -I "~{d}{this_bam}" \
@@ -2117,9 +2114,6 @@ task MongoCallMtAndShifted {
         --max-mnp-distance 0 ~{d}{bamoutstr}
 
       echo "Obtaining force calls for specified VCF: ~{d}{this_shifted_force_vcf}"
-
-      # Fix for DNANexus weirdness
-      gatk IndexFeatureFile -I "~{d}{this_shifted_force_vcf}"
 
       gatk --java-options "-Xmx~{command_mem}m" Mutect2 \
         -R "~{d}{this_self_shifted_fasta}" \
