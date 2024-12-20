@@ -120,6 +120,7 @@ task SubsetBamToChrM {
   command <<<
       gatk --java-options "-Xmx~{command_mem}m" PrintReads \
       ~{"-R " + ref_fasta} \
+      ~{"--sequence-dictionary " + ref_dict} \
       ~{"-L " + mt_interval_list} \
       ~{"-L " + nuc_interval_list} \
       ~{"-L " + contig_name} \
